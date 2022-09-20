@@ -160,6 +160,9 @@ function script.SaveActorsToResurrect()
 end
 
 function script.CreateInitalActorEntry(initialCellDescription, uniqueIndex, location)
+    -- Do not write the same uniqueIndex twice
+    if script.actorsToResurrect[uniqueIndex] ~= nil then return end
+
     script.actorsToResurrect[uniqueIndex] = {
         resurrectCellDescription = initialCellDescription,
         resurrectLocation = tableHelper.deepCopy(location),
@@ -275,6 +278,17 @@ function script.OnPlayerAuthentifiedHandler(eventStatus, pid)
     end
 end
 
+-- Handle customly spawned actors or actors spawned via levelled lists
+-- there is an overlap between levelled list spawned actors and those initially receieved in actorList
+function script.OnObjectSpawnHandler(eventStatus, pid, cellDescription, objects)
+    for uniqueIndex, object in pairs(objects) do
+        -- Do not resurrect summons
+        if object.summon == nil then
+            script.CreateInitalActorEntry(cellDescription, uniqueIndex, object.location)
+        end
+    end
+end
+
 function script.OnActorDeathHandler(eventStatus, pid, cellDescription, actors)
 
     local cell = LoadedCells[cellDescription]
@@ -308,4 +322,5 @@ end
 customEventHooks.registerHandler("OnServerPostInit", script.OnServerPostInitHandler)
 customEventHooks.registerHandler("OnActorList", script.OnActorListHandler)
 customEventHooks.registerHandler("OnPlayerAuthentified", script.OnPlayerAuthentifiedHandler)
+customEventHooks.registerHandler("OnObjectSpawn", script.OnObjectSpawnHandler)
 customEventHooks.registerHandler("OnActorDeath", script.OnActorDeathHandler)
