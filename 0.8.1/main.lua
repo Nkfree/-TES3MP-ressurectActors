@@ -159,14 +159,15 @@ function script.SaveActorsToResurrect()
     jsonInterface.quicksave("custom/resurrectActors.json", script.actorsToResurrect)
 end
 
-function script.CreateInitalActorEntry(initialCellDescription, uniqueIndex, location)
+function script.CreateInitalActorEntry(initialCellDescription, uniqueIndex, refId, location)
     -- Do not write the same uniqueIndex twice
     if script.actorsToResurrect[uniqueIndex] ~= nil then return end
 
     script.actorsToResurrect[uniqueIndex] = {
+        deathCellDescription = nil,
+        refId = string.lower(refId),
         resurrectCellDescription = initialCellDescription,
-        resurrectLocation = tableHelper.deepCopy(location),
-        deathCellDescription = nil
+        resurrectLocation = tableHelper.deepCopy(location)
     }
 end
 
@@ -183,20 +184,19 @@ function ResurrectActor(uniqueIndex)
 
     if logicHandler.GetConnectedPlayerCount() < 1 then return end
 
-    local actor = script.actorsToResurrect[uniqueIndex]
+    local actorData = script.actorsToResurrect[uniqueIndex]
 
-    if actor == nil then
+    if actorData == nil then
         return
     end
 
-    local deathCellDescription = actor.deathCellDescription
-    local resurrectCellDescription = actor.resurrectCellDescription
-    local resurrectLocation = actor.resurrectLocation
+    local deathCellDescription = actorData.deathCellDescription
+    local refId = actorData.refId
+    local resurrectCellDescription = actorData.resurrectCellDescription
+    local resurrectLocation = actorData.resurrectLocation
 
     local cell = LoadedCells[deathCellDescription] or logicHandler.LoadCell(deathCellDescription) or
         LoadedCells[deathCellDescription]
-
-    local actorRefId = cell.data.objectData[uniqueIndex].refId
 
     -- Remove actor from world and cell data
     logicHandler.DeleteObjectForEveryone(deathCellDescription, uniqueIndex)
@@ -210,25 +210,23 @@ function ResurrectActor(uniqueIndex)
     tableHelper.removeValue(cell.data.packets.statsDynamic, uniqueIndex)
     cell.data.objectData[uniqueIndex] = nil
 
-    -- Handle deathCell not matching resurrectCell
-    if deathCellDescription ~= resurrectCellDescription then
-        if #cell.visitors == 0 then
-            logicHandler.UnloadCell(deathCellDescription)
-        end
+    -- Handle cell unloading - if it should happen
+    if deathCellDescription ~= resurrectCellDescription and #cell.visitors == 0 then
+        logicHandler.UnloadCell(deathCellDescription)
     end
 
     cell = LoadedCells[resurrectCellDescription] or logicHandler.LoadCell(resurrectCellDescription) or
         LoadedCells[resurrectCellDescription]
 
     local newUniqueIndex = logicHandler.CreateObjectAtLocation(resurrectCellDescription, resurrectLocation,
-        dataTableBuilder.BuildObjectData(actorRefId), "spawn")
+        dataTableBuilder.BuildObjectData(refId), "spawn")
 
     tes3mp.LogMessage(enumerations.log.INFO,
         "[ResurrectActors] Resurrected " ..
-        actorRefId ..
-        " with new uniqueIndex: " .. newUniqueIndex .. "(" .. uniqueIndex .. ") at " .. actor.resurrectCellDescription)
+        refId ..
+        " with new uniqueIndex: " .. newUniqueIndex .. "(" .. uniqueIndex .. ") at " .. resurrectCellDescription)
 
-    script.CreateInitalActorEntry(resurrectCellDescription, newUniqueIndex, resurrectLocation)
+    script.CreateInitalActorEntry(resurrectCellDescription, newUniqueIndex, refId, resurrectLocation)
     script.actorsToResurrect[uniqueIndex] = nil
     script.SaveActorsToResurrect()
 
@@ -244,9 +242,13 @@ function SaveInitialActorPositions(cellDescription)
 
     cell:SaveActorPositions()
 
+    local objectData = cell.data.objectData
+
     for _, uniqueIndex in ipairs(cell.data.packets.actorList) do
-        if cell.data.objectData[uniqueIndex] ~= nil and cell.data.objectData[uniqueIndex].location ~= nil then
-            script.CreateInitalActorEntry(cellDescription, uniqueIndex, cell.data.objectData[uniqueIndex].location)
+        if objectData[uniqueIndex] ~= nil and objectData[uniqueIndex].refId ~= nil and
+            objectData[uniqueIndex].location ~= nil then
+            script.CreateInitalActorEntry(cellDescription, uniqueIndex, objectData[uniqueIndex].refId,
+                objectData[uniqueIndex].location)
         end
     end
 
@@ -272,19 +274,18 @@ function script.OnPlayerAuthentifiedHandler(eventStatus, pid)
 
     for uniqueIndex, actorData in pairs(script.actorsToResurrect) do
         if actorData.deathCellDescription ~= nil then
-            local resurrectTime = script.GetActorResurrectTime(actor.refId)
+            local resurrectTime = script.GetActorResurrectTime(actorData.refId)
             tes3mp.StartTimer(tes3mp.CreateTimerEx("ResurrectActor", time.seconds(resurrectTime), "s", uniqueIndex))
         end
     end
 end
 
--- Handle customly spawned actors or actors spawned via levelled lists
--- there is an overlap between levelled list spawned actors and those initially receieved in actorList
+-- Handle customly spawned actors
 function script.OnObjectSpawnHandler(eventStatus, pid, cellDescription, objects)
     for uniqueIndex, object in pairs(objects) do
         -- Do not resurrect summons
         if object.summon == nil then
-            script.CreateInitalActorEntry(cellDescription, uniqueIndex, object.location)
+            script.CreateInitalActorEntry(cellDescription, uniqueIndex, object.refId, object.location)
         end
     end
 end
@@ -300,11 +301,10 @@ function script.OnActorDeathHandler(eventStatus, pid, cellDescription, actors)
         cell = LoadedCells[cellDescription]
     end
 
-    for uniqueIndex, actor in pairs(actors) do
-        local resurrectData = script.actorsToResurrect[uniqueIndex]
-        if resurrectData == nil or resurrectData.deathCellDescription == nil then
-            local actorRefIdLower = string.lower(actor.refId)
-            local resurrectTime = script.GetActorResurrectTime(actorRefIdLower)
+    for uniqueIndex, _ in pairs(actors) do
+        local actorData = script.actorsToResurrect[uniqueIndex]
+        if actorData == nil or actorData.deathCellDescription == nil then
+            local resurrectTime = script.GetActorResurrectTime(actorData.refId)
 
             if resurrectTime ~= nil then
                 script.MarkActorDeathCell(cellDescription, uniqueIndex)
