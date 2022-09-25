@@ -303,7 +303,7 @@ function script.OnActorDeathHandler(eventStatus, pid, cellDescription, actors)
 
     for uniqueIndex, _ in pairs(actors) do
         local actorData = script.actorsToResurrect[uniqueIndex]
-        if actorData == nil or actorData.deathCellDescription == nil then
+        if actorData ~= nil and actorData.deathCellDescription == nil and actorData.refId ~= nil then
             local resurrectTime = script.GetActorResurrectTime(actorData.refId)
 
             if resurrectTime ~= nil then
